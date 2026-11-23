@@ -15,6 +15,8 @@ Server: Node + TypeScript + `ws`. Client: plain HTML/JS + canvas in `public/`.
 - `src/room.ts` — in-memory member map with authoritative positions and join-time spawn state.
 - `src/server.ts` — HTTP static host + `ws` upgrade; global/chat/signal limits, target-only signal relay, 20 Hz tick.
 - `public/index.html` + `public/client.js` — join form, canvas renderer, keyboard intent, chat UI, audio dispatch.
+- `public/tokens.css` — Material 3 light colors plus `--app-*` tokens; dark later only redefines `--md-sys-color-*`.
+- `public/styles.css` — token-only styles for the UI shell.
 - `public/audio.js` — audio-only WebRTC mesh; mic toggle, retry, ICE queue, peer cleanup.
 - `test/room-integration.test.mjs` — real-`ws` coverage via `startServer(0)`.
 - `.github/workflows/ci.yaml` — runs lint, typecheck, and tests on PRs to `main`.
@@ -29,6 +31,8 @@ Server: Node + TypeScript + `ws`. Client: plain HTML/JS + canvas in `public/`.
 - Every WebSocket message has a TypeScript type and is validated on the server.
 - Never trust client input: validate names, message size, move magnitude, and rate-limit move/chat/signaling messages.
 - The server is authoritative for positions; clients send intent only.
+- UI tokens live in `public/tokens.css`; CSS and canvas reference tokens only, with no color literals outside that file.
+- Canvas reads token values once via `getComputedStyle`; dark theme later only redefines `--md-sys-color-*`.
 - Room state lives in memory. No database yet.
 
 ## Workflow
@@ -42,6 +46,7 @@ Server: Node + TypeScript + `ws`. Client: plain HTML/JS + canvas in `public/`.
 ## Docs
 - WebSocket message protocol: see `docs/protocol.md`. Update it in the same commit whenever a message type changes.
 - Audio signaling: see `docs/audio-signaling.md`.
+- UI tokens: see `docs/ui.md`. Update it whenever the token contract changes.
 
 ## Testing rules
 - Keep tests isolated and organized by feature.
