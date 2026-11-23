@@ -1,0 +1,149 @@
+body {
+  font: var(--app-type-body);
+  margin: var(--app-space-5);
+  background: var(--md-sys-color-surface);
+  color: var(--md-sys-color-on-surface);
+}
+
+main {
+  max-width: 52rem;
+}
+
+h1 {
+  font: var(--app-type-title);
+  margin: 0 0 var(--app-space-3);
+}
+
+h2 {
+  font: var(--app-type-title);
+  margin: 0 0 var(--app-space-2);
+}
+
+form {
+  display: flex;
+  gap: var(--app-space-2);
+  margin: var(--app-space-3) 0;
+}
+
+input {
+  flex: 1;
+  padding: var(--app-space-2);
+  font: var(--app-type-body);
+  color: var(--md-sys-color-on-surface);
+  background: var(--md-sys-color-surface);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--app-radius-sm);
+}
+
+input::placeholder {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+button {
+  padding: var(--app-space-2) var(--app-space-3);
+  font: var(--app-type-label);
+  color: var(--md-sys-color-on-primary);
+  background-color: var(--md-sys-color-primary);
+  border: 1px solid var(--md-sys-color-primary);
+  border-radius: var(--app-radius-sm);
+  cursor: pointer;
+  transition: background-color var(--app-duration-fast), box-shadow var(--app-duration-fast);
+}
+
+button:hover {
+  background-image: linear-gradient(var(--app-state-hover), var(--app-state-hover));
+}
+
+button:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
+  background-image: linear-gradient(var(--app-state-focus), var(--app-state-focus));
+}
+
+button:active {
+  background-image: linear-gradient(var(--app-state-pressed), var(--app-state-pressed));
+}
+
+button:disabled {
+  color: var(--app-state-disabled);
+  background-color: var(--md-sys-color-surface-container-high);
+  border-color: var(--md-sys-color-outline-variant);
+  cursor: not-allowed;
+}
+
+[role="status"] {
+  color: var(--app-color-disconnected);
+}
+
+#status[data-state="connecting"] {
+  color: var(--app-color-connecting);
+}
+
+#status[data-state="connected"] {
+  color: var(--app-color-connected);
+}
+
+#status[data-state="disconnected"] {
+  color: var(--app-color-disconnected);
+}
+
+#hint {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+canvas {
+  display: block;
+  height: auto;
+  margin-top: var(--app-space-3);
+  max-width: 100%;
+  border-radius: var(--app-radius-sm);
+  background: var(--md-sys-color-surface-container-low);
+}
+
+#chat,
+#audio-controls {
+  background: var(--md-sys-color-surface-container-low);
+  border-radius: var(--app-radius-md);
+  box-shadow: var(--app-shadow-soft);
+}
+
+#chat {
+  margin-top: var(--app-space-3);
+}
+
+#audio-controls {
+  margin-top: var(--app-space-2);
+}
+
+#messages {
+  list-style: none;
+  max-height: 12rem;
+  overflow-y: auto;
+  padding: 0;
+}
+
+#messages li {
+  padding: calc(var(--app-space-1) / 2) 0;
+}
+
+#chat-form {
+  margin-top: var(--app-space-2);
+}
+
+#mic-toggle[aria-pressed="true"] {
+  color: var(--md-sys-color-on-secondary-container);
+  background-color: var(--md-sys-color-secondary-container);
+  border-color: var(--md-sys-color-secondary-container);
+}
+
+#mic-toggle[aria-pressed="false"] {
+  color: var(--md-sys-color-on-surface-variant);
+  background-color: var(--md-sys-color-surface-container-high);
+  border-color: var(--md-sys-color-outline-variant);
+}
+
+#mic-retry:not([hidden]) {
+  color: var(--md-sys-color-on-error);
+  background-color: var(--md-sys-color-error);
+  border-color: var(--md-sys-color-error);
+}
