@@ -17,6 +17,7 @@ import { parseClientMessage } from './validate.js';
 
 const DIST_DIR = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = resolve(DIST_DIR, '../public');
+const LISTEN_HOST = '0.0.0.0';
 const RATE_LIMIT_WINDOW_MS = 1000;
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -214,7 +215,7 @@ function listen(server: Server, port: number): Promise<void> {
     };
     server.once('error', onError);
     server.once('listening', onListening);
-    server.listen(port, '127.0.0.1');
+    server.listen(port, LISTEN_HOST);
   });
 }
 
@@ -240,7 +241,7 @@ if (entry !== undefined && import.meta.url === pathToFileURL(entry).href) {
   } else {
     startServer(port)
       .then(({ port: boundPort }) => {
-        console.log(`Virtual Room listening on http://localhost:${boundPort}`);
+        console.log(`Virtual Room listening on ${LISTEN_HOST}:${boundPort}`);
       })
       .catch((error: unknown) => {
         console.error(error);
