@@ -21,6 +21,12 @@ Server: Node + TypeScript + `ws`. Client: plain HTML/JS in `public/`.
 - Anything involving connections needs an integration test using real WebSocket clients.
 - For non-trivial tasks, propose a plan first and wait for approval before coding.
 
+## Docs
+- WebSocket message protocol: see `docs/protocol.md`. Update it in the same commit whenever a message type changes.
+
+## Testing rules
+- If a test fails, fix the code. Never weaken or delete a test without asking.
+
 ## Do not
 - Do not add new dependencies without asking.
-- Do not build features outside Phase 1 (chat, movement, audio).
+- Do not build audio/WebRTC yet (Phase 3).

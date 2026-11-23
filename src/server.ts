@@ -3,12 +3,19 @@ import { readFile } from 'node:fs/promises';
 import { dirname, extname, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import WebSocket, { WebSocketServer } from 'ws';
-import { MAX_MESSAGE_BYTES, type ErrorCode, type ServerMessage } from './messages.js';
+import {
+  MAX_MESSAGES_PER_SECOND,
+  MAX_MESSAGE_BYTES,
+  TICK_INTERVAL_MS,
+  type ErrorCode,
+  type ServerMessage,
+} from './messages.js';
 import { Room } from './room.js';
 import { parseClientMessage } from './validate.js';
 
 const DIST_DIR = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = resolve(DIST_DIR, '../public');
+const RATE_LIMIT_WINDOW_MS = 1000;
 
 const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -33,15 +40,43 @@ export async function startServer(port = 0): Promise<RunningServer> {
   });
   const wss = new WebSocketServer({ server: httpServer, maxPayload: MAX_MESSAGE_BYTES });
 
+  const broadcastRoom = (message: ServerMessage): void => {
+    const payload = JSON.stringify(message);
+    for (const client of wss.clients) {
+      if (client.readyState === WebSocket.OPEN && room.has(client)) client.send(payload);
+    }
+  };
+
+  let tick = 0;
+  const tickTimer = setInterval(() => {
+    tick += 1;
+    broadcastRoom({ type: 'positions', tick, players: room.positions() });
+  }, TICK_INTERVAL_MS);
+
   wss.on('connection', (socket) => {
     socket.on('error', () => {});
+
+    let rateWindowStartedAt = Date.now();
+    let messageCount = 0;
+    let lastRateLimitErrorAt = -Infinity;
+
     socket.on('message', (raw, isBinary) => {
-      if (isBinary) {
-        sendError(socket, 'invalid_message', 'Text messages only.');
+      const now = Date.now();
+      if (now - rateWindowStartedAt >= RATE_LIMIT_WINDOW_MS) {
+        rateWindowStartedAt = now;
+        messageCount = 0;
+      }
+      messageCount += 1;
+      if (messageCount > MAX_MESSAGES_PER_SECOND) {
+        if (now - lastRateLimitErrorAt >= RATE_LIMIT_WINDOW_MS) {
+          sendError(socket, 'rate_limited', 'Message rate limit exceeded.');
+          lastRateLimitErrorAt = now;
+        }
         return;
       }
-      if (room.has(socket)) {
-        sendError(socket, 'already_joined', 'You have already joined the room.');
+
+      if (isBinary) {
+        sendError(socket, 'invalid_message', 'Text messages only.');
         return;
       }
 
@@ -51,21 +86,37 @@ export async function startServer(port = 0): Promise<RunningServer> {
         return;
       }
 
-      const { displayName } = parsed.message;
-      if (room.hasDisplayName(displayName)) {
-        sendError(socket, 'duplicate_display_name', `Display name "${displayName}" is already taken.`);
+      if (parsed.message.type === 'join') {
+        if (room.has(socket)) {
+          sendError(socket, 'already_joined', 'You have already joined the room.');
+          return;
+        }
+        const { displayName } = parsed.message;
+        if (room.hasDisplayName(displayName)) {
+          sendError(socket, 'duplicate_display_name', `Display name "${displayName}" is already taken.`);
+          return;
+        }
+
+        room.add(socket, displayName, now);
+        send(socket, { type: 'joined', displayName, participants: room.participants });
+        send(socket, { type: 'snapshot', players: room.positions() });
+        broadcastRoom({ type: 'presence', participants: room.participants });
         return;
       }
 
-      room.add(socket, displayName);
-      send(socket, { type: 'joined', displayName, participants: room.participants });
-      broadcast(wss, { type: 'presence', participants: room.participants });
+      if (!room.has(socket)) {
+        sendError(socket, 'not_joined', 'Join before moving.');
+        return;
+      }
+
+      const outcome = room.applyMove(socket, parsed.message.dx, parsed.message.dy, now);
+      if (!outcome.ok) sendError(socket, outcome.code, 'Join before moving.');
     });
 
     socket.on('close', () => {
       if (!room.has(socket)) return;
       room.remove(socket);
-      broadcast(wss, { type: 'presence', participants: room.participants });
+      broadcastRoom({ type: 'presence', participants: room.participants });
     });
   });
 
@@ -78,6 +129,7 @@ export async function startServer(port = 0): Promise<RunningServer> {
     wss,
     port: boundPort,
     close: async () => {
+      clearInterval(tickTimer);
       for (const client of wss.clients) client.terminate();
       await closeWebSocketServer(wss);
       await closeHttpServer(httpServer);
@@ -119,13 +171,6 @@ function send(socket: WebSocket, message: ServerMessage): void {
 
 function sendError(socket: WebSocket, code: ErrorCode, message: string): void {
   send(socket, { type: 'error', code, message });
-}
-
-function broadcast(wss: WebSocketServer, message: ServerMessage): void {
-  const payload = JSON.stringify(message);
-  for (const client of wss.clients) {
-    if (client.readyState === WebSocket.OPEN) client.send(payload);
-  }
 }
 
 function listen(server: Server, port: number): Promise<void> {

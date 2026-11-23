@@ -6,12 +6,12 @@
     <title>Virtual Room</title>
     <style>
       body { font-family: system-ui, sans-serif; margin: 2rem; }
-      main { max-width: 32rem; }
+      main { max-width: 52rem; }
       form { display: flex; gap: 0.5rem; margin: 1rem 0; }
       input { flex: 1; padding: 0.5rem; }
       button { padding: 0.5rem 1rem; }
       [role="status"] { color: #444; }
-      ul { padding-left: 1.25rem; }
+      canvas { border: 1px solid #cbd5e1; display: block; height: auto; margin-top: 1rem; max-width: 100%; }
     </style>
   </head>
   <body>
@@ -23,10 +23,8 @@
         <button type="submit">Join</button>
       </form>
       <p id="status" role="status">Enter a display name to join.</p>
-      <section id="room" hidden>
-        <h2>In the room</h2>
-        <ul id="participants"></ul>
-      </section>
+      <p id="hint" hidden>Use WASD or arrow keys to move.</p>
+      <canvas id="room-canvas" width="800" height="600" hidden></canvas>
     </main>
     <script type="module" src="/client.js"></script>
   </body>

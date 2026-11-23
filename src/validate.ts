@@ -2,6 +2,7 @@ import { Buffer } from 'node:buffer';
 import {
   MAX_DISPLAY_NAME_LENGTH,
   MAX_MESSAGE_BYTES,
+  MAX_MOVE_MAGNITUDE,
   type ClientMessage,
   type ErrorCode,
 } from './messages.js';
@@ -22,16 +23,18 @@ export function parseClientMessage(raw: string): ParseResult {
     return failure('invalid_message', 'Message must be valid JSON.');
   }
 
-  if (
-    typeof value !== 'object' ||
-    value === null ||
-    Array.isArray(value) ||
-    (value as Record<string, unknown>).type !== 'join'
-  ) {
-    return failure('invalid_message', 'Expected a join message.');
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return failure('invalid_message', 'Expected a JSON object.');
   }
 
-  const displayName = (value as Record<string, unknown>).displayName;
+  const record = value as Record<string, unknown>;
+  if (record.type === 'join') return parseJoin(record);
+  if (record.type === 'move') return parseMove(record);
+  return failure('invalid_message', 'Unknown message type.');
+}
+
+function parseJoin(record: Record<string, unknown>): ParseResult {
+  const displayName = record.displayName;
   if (typeof displayName !== 'string') {
     return failure('invalid_display_name', 'Display name must be a string.');
   }
@@ -48,6 +51,21 @@ export function parseClientMessage(raw: string): ParseResult {
   }
 
   return { ok: true, message: { type: 'join', displayName: normalized } };
+}
+
+function parseMove(record: Record<string, unknown>): ParseResult {
+  const { dx, dy } = record;
+  if (!isFiniteNumber(dx) || !isFiniteNumber(dy)) {
+    return failure('invalid_move', 'dx and dy must be finite numbers.');
+  }
+  if (Math.hypot(dx, dy) > MAX_MOVE_MAGNITUDE) {
+    return failure('invalid_move_magnitude', 'Move magnitude must be at most 1.');
+  }
+  return { ok: true, message: { type: 'move', dx, dy } };
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
 function failure(code: ErrorCode, message: string): ParseResult {
