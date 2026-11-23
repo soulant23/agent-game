@@ -203,7 +203,7 @@ test('closes connections that exceed the message size limit', async () => {
   const socket = openSocket();
   await onceOpen(socket);
   const closed = onceClose(socket);
-  socket.send(JSON.stringify({ type: 'join', displayName: 'x'.repeat(2048) }));
+  socket.send(JSON.stringify({ type: 'join', displayName: 'x'.repeat(16_385) }));
 
   assert.equal(await closed, 1009);
 });

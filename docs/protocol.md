@@ -145,9 +145,17 @@ Broadcast to all joined clients, including the sender; no history is stored.
 | `invalid_move` | Missing or non-finite `dx` or `dy` |
 | `invalid_move_magnitude` | Magnitude greater than `1 + 1e-6` |
 | `invalid_chat` | Trimmed chat text empty or longer than 200 chars |
-| `rate_limited` | Over 60 messages/sec or 5 chats/10s |
+| `invalid_signal` | Bad signaling type/target/data or over 8192 bytes |
+| `target_not_in_room` | Signal target missing or in another room |
+| `room_full` | Join attempt with 8 players already joined |
+| `rate_limited` | Over 60 messages/sec, 5 chats/10s, or 150 signals/10s |
 
 An error changes no authoritative state.
+
+## Audio signaling (Phase 3)
+
+See `docs/audio-signaling.md` for `offer`/`answer`/`ice` → `signal` relay rules.
+Chat/move stay capped at 1024 bytes; signaling uses an 8192-byte cap.
 
 ## Ordering and lifecycle
 
