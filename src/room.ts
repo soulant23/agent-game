@@ -26,6 +26,10 @@ export class Room {
     return [...this.members.values()].map((member) => member.displayName);
   }
 
+  get size(): number {
+    return this.members.size;
+  }
+
   has(socket: WebSocket): boolean {
     return this.members.has(socket);
   }
@@ -50,6 +54,14 @@ export class Room {
 
   displayNameOf(socket: WebSocket): string | undefined {
     return this.members.get(socket)?.displayName;
+  }
+
+  socketFor(displayName: string): WebSocket | undefined {
+    const candidate = normalize(displayName);
+    for (const [socket, member] of this.members) {
+      if (normalize(member.displayName) === candidate) return socket;
+    }
+    return undefined;
   }
 
   positions(): PlayerPosition[] {

@@ -7,7 +7,10 @@ import {
   CHAT_LIMIT,
   CHAT_WINDOW_MS,
   MAX_MESSAGES_PER_SECOND,
-  MAX_MESSAGE_BYTES,
+  MAX_PAYLOAD_BYTES,
+  MAX_PLAYERS,
+  SIGNAL_LIMIT,
+  SIGNAL_WINDOW_MS,
   TICK_INTERVAL_MS,
   type ErrorCode,
   type ServerMessage,
@@ -40,7 +43,7 @@ export async function startServer(port = 0): Promise<RunningServer> {
   const httpServer = createServer((request, response) => {
     void serveStaticFile(request.url ?? '/', response);
   });
-  const wss = new WebSocketServer({ server: httpServer, maxPayload: MAX_MESSAGE_BYTES });
+  const wss = new WebSocketServer({ server: httpServer, maxPayload: MAX_PAYLOAD_BYTES });
 
   const broadcastRoom = (message: ServerMessage): void => {
     const payload = JSON.stringify(message);
@@ -63,9 +66,24 @@ export async function startServer(port = 0): Promise<RunningServer> {
     let lastRateLimitErrorAt = -Infinity;
     let chatWindowStartedAt = Date.now();
     let chatCount = 0;
+    let signalWindowStartedAt = Date.now();
+    let signalCount = 0;
+    let lastSignalRateLimitErrorAt = -Infinity;
 
     socket.on('message', (raw, isBinary) => {
       const now = Date.now();
+      if (isBinary) {
+        sendError(socket, 'invalid_message', 'Text messages only.');
+        return;
+      }
+
+      const parsed = parseClientMessage(raw.toString());
+      if (!parsed.ok) {
+        sendError(socket, parsed.code, parsed.message);
+        return;
+      }
+      const message = parsed.message;
+
       if (now - rateWindowStartedAt >= RATE_LIMIT_WINDOW_MS) {
         rateWindowStartedAt = now;
         messageCount = 0;
@@ -79,23 +97,16 @@ export async function startServer(port = 0): Promise<RunningServer> {
         return;
       }
 
-      if (isBinary) {
-        sendError(socket, 'invalid_message', 'Text messages only.');
-        return;
-      }
-
-      const parsed = parseClientMessage(raw.toString());
-      if (!parsed.ok) {
-        sendError(socket, parsed.code, parsed.message);
-        return;
-      }
-
-      if (parsed.message.type === 'join') {
+      if (message.type === 'join') {
         if (room.has(socket)) {
           sendError(socket, 'already_joined', 'You have already joined the room.');
           return;
         }
-        const { displayName } = parsed.message;
+        if (room.size >= MAX_PLAYERS) {
+          sendError(socket, 'room_full', `Room is full at ${MAX_PLAYERS} players.`);
+          return;
+        }
+        const { displayName } = message;
         if (room.hasDisplayName(displayName)) {
           sendError(socket, 'duplicate_display_name', `Display name "${displayName}" is already taken.`);
           return;
@@ -113,7 +124,7 @@ export async function startServer(port = 0): Promise<RunningServer> {
         return;
       }
 
-      if (parsed.message.type === 'chat') {
+      if (message.type === 'chat') {
         if (now - chatWindowStartedAt >= CHAT_WINDOW_MS) {
           chatWindowStartedAt = now;
           chatCount = 0;
@@ -132,14 +143,62 @@ export async function startServer(port = 0): Promise<RunningServer> {
         broadcastRoom({
           type: 'chat',
           displayName,
-          text: parsed.message.text,
+          text: message.text,
           timestamp: now,
         });
         return;
       }
 
-      const outcome = room.applyMove(socket, parsed.message.dx, parsed.message.dy, now);
-      if (!outcome.ok) sendError(socket, outcome.code, 'Join before sending messages.');
+      if (
+        message.type === 'offer' ||
+        message.type === 'answer' ||
+        message.type === 'ice'
+      ) {
+        const displayName = room.displayNameOf(socket);
+        if (displayName === undefined) {
+          sendError(socket, 'not_joined', 'Join before sending messages.');
+          return;
+        }
+        if (displayName.toLowerCase() === message.target.toLowerCase()) {
+          sendError(socket, 'invalid_signal', 'Cannot signal yourself.');
+          return;
+        }
+
+        if (now - signalWindowStartedAt >= SIGNAL_WINDOW_MS) {
+          signalWindowStartedAt = now;
+          signalCount = 0;
+        }
+        if (signalCount >= SIGNAL_LIMIT) {
+          if (now - lastSignalRateLimitErrorAt >= RATE_LIMIT_WINDOW_MS) {
+            sendError(socket, 'rate_limited', 'Signal rate limit exceeded.');
+            lastSignalRateLimitErrorAt = now;
+          }
+          return;
+        }
+        signalCount += 1;
+
+        const targetSocket = room.socketFor(message.target);
+        if (targetSocket === undefined) {
+          sendError(
+            socket,
+            'target_not_in_room',
+            `Player "${message.target}" is not in the room.`,
+          );
+          return;
+        }
+        send(targetSocket, {
+          type: 'signal',
+          kind: message.type,
+          from: displayName,
+          data: message.data,
+        });
+        return;
+      }
+
+      if (message.type === 'move') {
+        const outcome = room.applyMove(socket, message.dx, message.dy, now);
+        if (!outcome.ok) sendError(socket, outcome.code, 'Join before sending messages.');
+      }
     });
 
     socket.on('close', () => {

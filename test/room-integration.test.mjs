@@ -99,6 +99,32 @@ function waitForChat(socket, text) {
   );
 }
 
+function waitForSignal(socket, kind) {
+  return waitForMessage(
+    socket,
+    (message) => message.type === 'signal' && (kind === undefined || message.kind === kind),
+  );
+}
+
+function signalData(kind = 'offer') {
+  return kind === 'ice'
+    ? { candidate: 'candidate:1 1 udp 1 127.0.0.1 5000 typ host' }
+    : { type: kind, sdp: `v=0 ${kind}` };
+}
+
+function sendSignal(socket, kind, target, data = signalData(kind)) {
+  socket.send(JSON.stringify({ type: kind, target, data }));
+}
+
+function watchRateLimits(socket, seen) {
+  const onMessage = (data) => {
+    const message = JSON.parse(data.toString());
+    if (message.type === 'error' && message.code === 'rate_limited') seen.add(socket);
+  };
+  socket.on('message', onMessage);
+  return () => socket.off('message', onMessage);
+}
+
 async function collectMessages(socket, durationMs = 400) {
   const collected = [];
   const onMessage = (data) => collected.push(JSON.parse(data.toString()));
@@ -203,7 +229,7 @@ test('closes connections that exceed the message size limit', async () => {
   const socket = openSocket();
   await onceOpen(socket);
   const closed = onceClose(socket);
-  socket.send(JSON.stringify({ type: 'join', displayName: 'x'.repeat(2048) }));
+  socket.send(JSON.stringify({ type: 'join', displayName: 'x'.repeat(16_385) }));
 
   assert.equal(await closed, 1009);
 });
@@ -499,5 +525,228 @@ test('keeps chat working after another player disconnects', async () => {
   } finally {
     await closeSocket(alice);
     await closeSocket(bob);
+  }
+});
+
+test('relays signaling only to the target with a server-set sender', async () => {
+  const alice = await openAndJoin('SigAlice');
+  const bob = await openAndJoin('SigBob');
+  const carol = await openAndJoin('SigCarol');
+  try {
+    const toBob = waitForSignal(bob.socket, 'offer');
+    const carolMessages = collectMessages(carol.socket);
+    alice.socket.send(JSON.stringify({
+      type: 'offer',
+      target: 'SigBob',
+      data: { type: 'offer', sdp: 'v=0' },
+      from: 'Hacker',
+      timestamp: 0,
+    }));
+
+    const signal = await toBob;
+    assert.equal(signal.kind, 'offer');
+    assert.equal(signal.from, 'SigAlice');
+    assert.deepEqual(signal.data, { type: 'offer', sdp: 'v=0' });
+    assert.ok(!Object.values(signal.data).includes('Hacker'));
+    const unrelated = await carolMessages;
+    assert.ok(!unrelated.some((entry) => entry.type === 'signal'));
+
+    const toAliceAnswer = waitForSignal(alice.socket, 'answer');
+    sendSignal(bob.socket, 'answer', 'SigAlice');
+    const answer = await toAliceAnswer;
+    assert.equal(answer.from, 'SigBob');
+
+    const toAliceIce = waitForSignal(alice.socket, 'ice');
+    sendSignal(bob.socket, 'ice', 'SigAlice');
+    const ice = await toAliceIce;
+    assert.equal(ice.kind, 'ice');
+    assert.equal(ice.from, 'SigBob');
+  } finally {
+    await closeSocket(alice.socket);
+    await closeSocket(bob.socket);
+    await closeSocket(carol.socket);
+  }
+});
+
+test('rejects self-target and unknown targets', async () => {
+  const { socket } = await openAndJoin('SigTarget');
+  try {
+    sendSignal(socket, 'offer', 'SigTarget');
+    await waitForError(socket, 'invalid_signal');
+
+    sendSignal(socket, 'offer', 'SigTarget ');
+    await waitForError(socket, 'invalid_signal');
+
+    sendSignal(socket, 'offer', 'Nobody');
+    await waitForError(socket, 'target_not_in_room');
+  } finally {
+    await closeSocket(socket);
+  }
+});
+
+test('rejects signals to a player in another room', async () => {
+  const { socket } = await openAndJoin('SigRoom');
+  const other = await startServer(0);
+  const otherSocket = new WebSocket(`ws://127.0.0.1:${other.port}`);
+  sockets.add(otherSocket);
+  otherSocket.on('error', () => {});
+  otherSocket.once('close', () => sockets.delete(otherSocket));
+
+  try {
+    await onceOpen(otherSocket);
+    otherSocket.send(JSON.stringify({ type: 'join', displayName: 'Elsewhere' }));
+    await waitForMessage(otherSocket, (message) => message.type === 'joined');
+
+    sendSignal(socket, 'offer', 'Elsewhere');
+    const error = await waitForError(socket, 'target_not_in_room');
+    assert.equal(error.type, 'error');
+  } finally {
+    await closeSocket(otherSocket);
+    await other.close();
+    await closeSocket(socket);
+  }
+});
+
+test('rejects invalid signaling data and oversize signaling', async () => {
+  const { socket } = await openAndJoin('SigInvalid');
+  try {
+    const invalid = [
+      { type: 'offer', target: 'Nobody', data: 'nope' },
+      { type: 'offer', target: 'Nobody', data: { type: 'answer', sdp: 'v=0' } },
+      { type: 'ice', target: 'Nobody', data: {} },
+      { type: 'offer', target: 42, data: signalData('offer') },
+      { type: 'offer', target: 'Nobody', data: { type: 'offer', sdp: 'x'.repeat(8200) } },
+    ];
+    for (const message of invalid) {
+      socket.send(JSON.stringify(message));
+      await waitForError(socket, 'invalid_signal');
+    }
+  } finally {
+    await closeSocket(socket);
+  }
+});
+
+test('rejects signaling before join', async () => {
+  const socket = openSocket();
+  try {
+    await onceOpen(socket);
+    sendSignal(socket, 'offer', 'Anyone');
+    const error = await waitForError(socket, 'not_joined');
+    assert.equal(error.type, 'error');
+  } finally {
+    await closeSocket(socket);
+  }
+});
+
+test('rate limits signaling at 150 messages per ten seconds', async () => {
+  const sender = await openAndJoin('SigRate');
+  const target = await openAndJoin('SigRateTarget');
+  const limited = new Set();
+  const stopWatching = watchRateLimits(sender.socket, limited);
+  try {
+    const received = collectMessages(target.socket, 6000);
+    for (let index = 0; index < 151; index += 1) {
+      sendSignal(sender.socket, 'ice', 'SigRateTarget');
+      await delay(20);
+    }
+    const signals = (await received).filter((entry) => entry.type === 'signal');
+    assert.equal(signals.length, 150);
+    assert.ok(limited.has(sender.socket), 'expected a rate_limited error');
+  } finally {
+    stopWatching();
+    await closeSocket(sender.socket);
+    await closeSocket(target.socket);
+  }
+});
+
+test('six players join and signal quickly without rate_limited', async () => {
+  const members = [];
+  const limited = new Set();
+  const stopWatching = [];
+  try {
+    for (let index = 0; index < 6; index += 1) {
+      members.push(await openAndJoin(`Fast${index}`));
+    }
+    for (const member of members) stopWatching.push(watchRateLimits(member.socket, limited));
+    for (let index = 0; index < members.length; index += 1) {
+      const target = members[(index + 1) % members.length].joined.displayName;
+      sendSignal(members[index].socket, 'offer', target);
+    }
+    await delay(200);
+    assert.equal(limited.size, 0);
+  } finally {
+    for (const stop of stopWatching) stop();
+    for (const member of members) await closeSocket(member.socket);
+  }
+});
+
+test('signaling survives joins while one player moves at 20/s', async () => {
+  const members = [];
+  try {
+    for (let index = 0; index < 7; index += 1) {
+      members.push(await openAndJoin(`Load${index}`));
+    }
+    const mover = members[0].socket;
+    const sender = members[1].socket;
+    const target = members[2];
+    const limited = new Set();
+    const stopWatching = [
+      watchRateLimits(mover, limited),
+      watchRateLimits(sender, limited),
+    ];
+
+    let moverTimer;
+    try {
+      const received = collectMessages(target.socket, 1400);
+      moverTimer = setInterval(() => {
+        mover.send(JSON.stringify({ type: 'move', dx: 0, dy: 0 }));
+      }, 50);
+      for (let index = 0; index < 30; index += 1) {
+        sendSignal(sender, 'ice', target.joined.displayName);
+        await delay(30);
+      }
+      clearInterval(moverTimer);
+      moverTimer = undefined;
+
+      const signals = (await received).filter((entry) => entry.type === 'signal');
+      assert.equal(signals.length, 30);
+      assert.equal(limited.size, 0);
+    } finally {
+      if (moverTimer !== undefined) clearInterval(moverTimer);
+      for (const stop of stopWatching) stop();
+    }
+  } finally {
+    for (const member of members) await closeSocket(member.socket);
+  }
+});
+
+test('rejects joins above the eight-player cap', async () => {
+  const members = [];
+  let extra;
+  try {
+    for (let index = 0; index < 8; index += 1) {
+      members.push(await openAndJoin(`Cap${index}`));
+    }
+    extra = openSocket();
+    await onceOpen(extra);
+    extra.send(JSON.stringify({ type: 'join', displayName: 'Cap8' }));
+    const error = await waitForError(extra, 'room_full');
+    assert.equal(error.type, 'error');
+  } finally {
+    if (extra !== undefined) await closeSocket(extra);
+    for (const member of members) await closeSocket(member.socket);
+  }
+});
+
+test('keeps chat and move messages capped at 1024 bytes', async () => {
+  const { socket } = await openAndJoin('SizeKeep');
+  try {
+    socket.send(JSON.stringify({ type: 'chat', text: 'x'.repeat(1200) }));
+    await waitForError(socket, 'message_too_large');
+
+    socket.send(JSON.stringify({ type: 'move', dx: 0, dy: 0, padding: 'x'.repeat(1200) }));
+    await waitForError(socket, 'message_too_large');
+  } finally {
+    await closeSocket(socket);
   }
 });

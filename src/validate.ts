@@ -4,8 +4,11 @@ import {
   MAX_DISPLAY_NAME_LENGTH,
   MAX_MESSAGE_BYTES,
   MAX_MOVE_MAGNITUDE,
+  MAX_PAYLOAD_BYTES,
+  MAX_SIGNAL_BYTES,
   type ClientMessage,
   type ErrorCode,
+  type SignalKind,
 } from './messages.js';
 
 export type ParseResult =
@@ -13,8 +16,9 @@ export type ParseResult =
   | { ok: false; code: ErrorCode; message: string };
 
 export function parseClientMessage(raw: string): ParseResult {
-  if (Buffer.byteLength(raw, 'utf8') > MAX_MESSAGE_BYTES) {
-    return failure('message_too_large', `Messages must be at most ${MAX_MESSAGE_BYTES} bytes.`);
+  const rawBytes = Buffer.byteLength(raw, 'utf8');
+  if (rawBytes > MAX_PAYLOAD_BYTES) {
+    return failure('message_too_large', `Messages must be at most ${MAX_PAYLOAD_BYTES} bytes.`);
   }
 
   let value: unknown;
@@ -29,6 +33,10 @@ export function parseClientMessage(raw: string): ParseResult {
   }
 
   const record = value as Record<string, unknown>;
+  if (isSignalKind(record.type)) return parseSignal(record, record.type, rawBytes);
+  if (rawBytes > MAX_MESSAGE_BYTES) {
+    return failure('message_too_large', `Messages must be at most ${MAX_MESSAGE_BYTES} bytes.`);
+  }
   if (record.type === 'join') return parseJoin(record);
   if (record.type === 'move') return parseMove(record);
   if (record.type === 'chat') return parseChat(record);
@@ -84,6 +92,51 @@ function parseChat(record: Record<string, unknown>): ParseResult {
   }
 
   return { ok: true, message: { type: 'chat', text: trimmed } };
+}
+
+function parseSignal(
+  record: Record<string, unknown>,
+  kind: SignalKind,
+  rawBytes: number,
+): ParseResult {
+  if (rawBytes > MAX_SIGNAL_BYTES) {
+    return failure(
+      'invalid_signal',
+      `Signaling messages must be at most ${MAX_SIGNAL_BYTES} bytes.`,
+    );
+  }
+
+  const target = record.target;
+  if (typeof target !== 'string') {
+    return failure('invalid_signal', 'Signal target must be a string.');
+  }
+  const normalized = target.trim();
+  if (normalized.length === 0 || normalized.length > MAX_DISPLAY_NAME_LENGTH) {
+    return failure('invalid_signal', 'Signal target must be 1-20 characters.');
+  }
+
+  const data = record.data;
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+    return failure('invalid_signal', 'Signal data must be an object.');
+  }
+  const dataRecord = data as Record<string, unknown>;
+  if (kind === 'ice') {
+    if (typeof dataRecord.candidate !== 'string') {
+      return failure('invalid_signal', 'ICE data must include a candidate string.');
+    }
+  } else if (
+    dataRecord.type !== kind ||
+    typeof dataRecord.sdp !== 'string' ||
+    dataRecord.sdp.length === 0
+  ) {
+    return failure('invalid_signal', 'SDP data must include matching type and sdp.');
+  }
+
+  return { ok: true, message: { type: kind, target: normalized, data: dataRecord } };
+}
+
+export function isSignalKind(value: unknown): value is SignalKind {
+  return value === 'offer' || value === 'answer' || value === 'ice';
 }
 
 function isFiniteNumber(value: unknown): value is number {
