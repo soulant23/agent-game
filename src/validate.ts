@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer';
 import {
+  MAX_CHAT_LENGTH,
   MAX_DISPLAY_NAME_LENGTH,
   MAX_MESSAGE_BYTES,
   MAX_MOVE_MAGNITUDE,
@@ -30,6 +31,7 @@ export function parseClientMessage(raw: string): ParseResult {
   const record = value as Record<string, unknown>;
   if (record.type === 'join') return parseJoin(record);
   if (record.type === 'move') return parseMove(record);
+  if (record.type === 'chat') return parseChat(record);
   return failure('invalid_message', 'Unknown message type.');
 }
 
@@ -62,6 +64,26 @@ function parseMove(record: Record<string, unknown>): ParseResult {
     return failure('invalid_move_magnitude', 'Move magnitude must be at most 1.');
   }
   return { ok: true, message: { type: 'move', dx, dy } };
+}
+
+function parseChat(record: Record<string, unknown>): ParseResult {
+  const { text } = record;
+  if (typeof text !== 'string') {
+    return failure('invalid_chat', 'Chat text must be a string.');
+  }
+
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    return failure('invalid_chat', 'Chat text is required.');
+  }
+  if (trimmed.length > MAX_CHAT_LENGTH) {
+    return failure(
+      'invalid_chat',
+      `Chat text must be at most ${MAX_CHAT_LENGTH} characters.`,
+    );
+  }
+
+  return { ok: true, message: { type: 'chat', text: trimmed } };
 }
 
 function isFiniteNumber(value: unknown): value is number {

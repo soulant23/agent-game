@@ -10,7 +10,18 @@ Server: Node + TypeScript + `ws`. Client: plain HTML/JS + canvas in `public/`.
 - Lint + types: `npm run lint && npm run typecheck`
 
 ## Architecture
-(Agent: fill this in from the real code, max ~15 lines: directory map, main components, main message flow, key design decisions with one-line reasons. Show me the diff before committing.)
+- `src/messages.ts` — typed WS contract and shared constants (payload, world, tick, chat limits).
+- `src/validate.ts` — JSON parsing and per-message validation; returns typed messages or error codes.
+- `src/room.ts` — in-memory member map with authoritative positions and join-time spawn state.
+- `src/server.ts` — HTTP static host + `ws` upgrade; global/chat rate limits, handlers, 20 Hz tick.
+- `public/index.html` + `public/client.js` — join form, canvas renderer, keyboard intent, chat UI.
+- `test/room-integration.test.mjs` — real-`ws` coverage via `startServer(0)`.
+- `.github/workflows/ci.yaml` — runs lint, typecheck, and tests on PRs to `main`.
+- Flow: `join` → `joined`/`snapshot`/`presence`; `move` → server clamps → periodic `positions`.
+- Flow: `chat` → server trims/validates/rate-limits → immediate `chat` broadcast to joined sockets.
+- Server sets display names/timestamps and owns positions; clients send intent/text only, preventing spoofing.
+- Rate limits are per socket in memory; excess messages are dropped, not queued (bounded memory).
+- No persistence or chat history; new joiners get only a position snapshot (Phase 2 scope).
 
 ## Conventions
 - Every WebSocket message has a TypeScript type and is validated on the server.

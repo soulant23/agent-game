@@ -4,6 +4,8 @@ import { dirname, extname, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import WebSocket, { WebSocketServer } from 'ws';
 import {
+  CHAT_LIMIT,
+  CHAT_WINDOW_MS,
   MAX_MESSAGES_PER_SECOND,
   MAX_MESSAGE_BYTES,
   TICK_INTERVAL_MS,
@@ -59,6 +61,8 @@ export async function startServer(port = 0): Promise<RunningServer> {
     let rateWindowStartedAt = Date.now();
     let messageCount = 0;
     let lastRateLimitErrorAt = -Infinity;
+    let chatWindowStartedAt = Date.now();
+    let chatCount = 0;
 
     socket.on('message', (raw, isBinary) => {
       const now = Date.now();
@@ -105,12 +109,37 @@ export async function startServer(port = 0): Promise<RunningServer> {
       }
 
       if (!room.has(socket)) {
-        sendError(socket, 'not_joined', 'Join before moving.');
+        sendError(socket, 'not_joined', 'Join before sending messages.');
+        return;
+      }
+
+      if (parsed.message.type === 'chat') {
+        if (now - chatWindowStartedAt >= CHAT_WINDOW_MS) {
+          chatWindowStartedAt = now;
+          chatCount = 0;
+        }
+        if (chatCount >= CHAT_LIMIT) {
+          sendError(socket, 'rate_limited', 'Chat rate limit exceeded.');
+          return;
+        }
+        chatCount += 1;
+
+        const displayName = room.displayNameOf(socket);
+        if (displayName === undefined) {
+          sendError(socket, 'not_joined', 'Join before sending messages.');
+          return;
+        }
+        broadcastRoom({
+          type: 'chat',
+          displayName,
+          text: parsed.message.text,
+          timestamp: now,
+        });
         return;
       }
 
       const outcome = room.applyMove(socket, parsed.message.dx, parsed.message.dy, now);
-      if (!outcome.ok) sendError(socket, outcome.code, 'Join before moving.');
+      if (!outcome.ok) sendError(socket, outcome.code, 'Join before sending messages.');
     });
 
     socket.on('close', () => {

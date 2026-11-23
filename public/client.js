@@ -13,6 +13,10 @@ const status = document.querySelector('#status');
 const hint = document.querySelector('#hint');
 const canvas = document.querySelector('#room-canvas');
 const context = canvas.getContext('2d');
+const chat = document.querySelector('#chat');
+const messages = document.querySelector('#messages');
+const chatForm = document.querySelector('#chat-form');
+const chatInput = document.querySelector('#chat-input');
 
 let socket = null;
 let joined = false;
@@ -34,7 +38,18 @@ form.addEventListener('submit', (event) => {
   connect(displayName);
 });
 
+chatForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (!joined || !socket || socket.readyState !== WebSocket.OPEN) return;
+  const text = chatInput.value;
+  if (text.trim().length === 0) return;
+  socket.send(JSON.stringify({ type: 'chat', text }));
+  chatInput.value = '';
+  chatInput.focus();
+});
+
 window.addEventListener('keydown', (event) => {
+  if (document.activeElement === chatInput) return;
   const key = event.key.toLowerCase();
   if (!MOVE_KEYS.has(key)) return;
   event.preventDefault();
@@ -42,7 +57,16 @@ window.addEventListener('keydown', (event) => {
 });
 
 window.addEventListener('keyup', (event) => {
+  if (document.activeElement === chatInput) return;
   keys.delete(event.key.toLowerCase());
+});
+
+chatInput.addEventListener('focus', () => {
+  keys.clear();
+});
+
+chatInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') chatInput.blur();
 });
 
 function connect(displayName) {
@@ -69,10 +93,13 @@ function connect(displayName) {
       form.hidden = true;
       hint.hidden = false;
       canvas.hidden = false;
+      chat.hidden = false;
       moveTimer = setInterval(sendMovementIntent, MOVE_INTERVAL_MS);
     } else if (message.type === 'snapshot' || message.type === 'positions') {
       players = message.players;
       render();
+    } else if (message.type === 'chat') {
+      appendChat(message);
     } else if (message.type === 'error') {
       setStatus(message.message);
       if (message.code === 'duplicate_display_name' || message.code === 'already_joined') {
@@ -128,6 +155,17 @@ function render() {
   }
 }
 
+function appendChat(message) {
+  const item = document.createElement('li');
+  const name = document.createElement('strong');
+  name.textContent = `${message.displayName}: `;
+  const text = document.createElement('span');
+  text.textContent = message.text;
+  item.append(name, text);
+  messages.append(item);
+  messages.scrollTop = messages.scrollHeight;
+}
+
 function stopPlaying() {
   joined = false;
   keys.clear();
@@ -135,6 +173,9 @@ function stopPlaying() {
   if (moveTimer !== null) clearInterval(moveTimer);
   moveTimer = null;
   socket = null;
+  chat.hidden = true;
+  messages.replaceChildren();
+  chatInput.value = '';
 }
 
 function setStatus(text) {

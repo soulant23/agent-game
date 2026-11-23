@@ -48,6 +48,10 @@ export class Room {
     this.members.delete(socket);
   }
 
+  displayNameOf(socket: WebSocket): string | undefined {
+    return this.members.get(socket)?.displayName;
+  }
+
   positions(): PlayerPosition[] {
     return [...this.members.values()].map((member) => ({
       displayName: member.displayName,
