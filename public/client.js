@@ -31,7 +31,23 @@ let socket = null;
 let joined = false;
 let moveTimer = null;
 let players = [];
+let selfDisplayName = '';
 const keys = new Set();
+
+const rootStyles = getComputedStyle(document.documentElement);
+const canvasTokens = {
+  background: readToken('--md-sys-color-surface-container-low'),
+  boundary: readToken('--md-sys-color-outline-variant'),
+  label: readToken('--md-sys-color-on-surface'),
+  self: readToken('--md-sys-color-primary'),
+  playerOutline: readToken('--app-player-outline'),
+  labelFont: readToken('--app-type-body'),
+  players: Array.from({ length: 8 }, (_, index) => readToken(`--app-player-${index + 1}`)),
+};
+
+function readToken(name) {
+  return rootStyles.getPropertyValue(name).trim();
+}
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -83,7 +99,7 @@ function connect(displayName) {
   if (socket && socket.readyState === WebSocket.OPEN) return;
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   socket = new WebSocket(`${protocol}//${location.host}`);
-  setStatus(`Connecting as ${displayName}…`);
+  setStatus(`Connecting as ${displayName}…`, 'connecting');
 
   socket.addEventListener('open', () => {
     socket.send(JSON.stringify({ type: 'join', displayName }));
@@ -99,7 +115,8 @@ function connect(displayName) {
 
     if (message.type === 'joined') {
       joined = true;
-      setStatus(`Joined as ${message.displayName}.`);
+      selfDisplayName = message.displayName;
+      setStatus(`Joined as ${message.displayName}.`, 'connected');
       form.hidden = true;
       hint.hidden = false;
       canvas.hidden = false;
@@ -116,7 +133,7 @@ function connect(displayName) {
     } else if (message.type === 'signal') {
       onSignalAudio(message);
     } else if (message.type === 'error') {
-      setStatus(message.message);
+      setStatus(message.message, 'disconnected');
       if (message.code === 'duplicate_display_name' || message.code === 'already_joined') {
         socket.close();
       }
@@ -125,11 +142,11 @@ function connect(displayName) {
 
   socket.addEventListener('close', () => {
     stopPlaying();
-    setStatus('Disconnected. Reload to rejoin.');
+    setStatus('Disconnected. Reload to rejoin.', 'disconnected');
   });
 
   socket.addEventListener('error', () => {
-    setStatus('Connection failed. Is the server running?');
+    setStatus('Connection failed. Is the server running?', 'disconnected');
   });
 }
 
@@ -152,22 +169,34 @@ function sendMovementIntent() {
 }
 
 function render() {
-  context.fillStyle = '#f8fafc';
+  context.fillStyle = canvasTokens.background;
   context.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+  context.strokeStyle = canvasTokens.boundary;
+  context.lineWidth = 1;
+  context.strokeRect(0.5, 0.5, WORLD_WIDTH - 1, WORLD_HEIGHT - 1);
 
   for (const player of players) {
     context.beginPath();
     context.arc(player.x, player.y, PLAYER_RADIUS, 0, Math.PI * 2);
-    context.fillStyle = '#2563eb';
+    context.fillStyle = canvasTokens.players[playerColorIndex(player.displayName)];
     context.fill();
-    context.strokeStyle = '#1e3a8a';
+    context.strokeStyle =
+      player.displayName === selfDisplayName ? canvasTokens.self : canvasTokens.playerOutline;
     context.stroke();
 
-    context.fillStyle = '#111827';
-    context.font = '14px system-ui, sans-serif';
+    context.fillStyle = canvasTokens.label;
+    context.font = canvasTokens.labelFont;
     context.textAlign = 'center';
     context.fillText(player.displayName, player.x, player.y - PLAYER_RADIUS - 6);
   }
+}
+
+function playerColorIndex(displayName) {
+  let hash = 0;
+  for (const char of displayName.toLowerCase()) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+  return hash % canvasTokens.players.length;
 }
 
 function appendChat(message) {
@@ -184,6 +213,7 @@ function appendChat(message) {
 function stopPlaying() {
   stopAudio();
   joined = false;
+  selfDisplayName = '';
   keys.clear();
   players = [];
   if (moveTimer !== null) clearInterval(moveTimer);
@@ -194,8 +224,9 @@ function stopPlaying() {
   chatInput.value = '';
 }
 
-function setStatus(text) {
+function setStatus(text, state = 'disconnected') {
   status.textContent = text;
+  status.dataset.state = state;
 }
 
 function sendAudio(message) {
