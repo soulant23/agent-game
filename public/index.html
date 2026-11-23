@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Virtual Room</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; }
+      main { max-width: 32rem; }
+      form { display: flex; gap: 0.5rem; margin: 1rem 0; }
+      input { flex: 1; padding: 0.5rem; }
+      button { padding: 0.5rem 1rem; }
+      [role="status"] { color: #444; }
+      ul { padding-left: 1.25rem; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Virtual Room</h1>
+      <form id="join-form">
+        <label for="display-name">Display name</label>
+        <input id="display-name" name="displayName" maxlength="20" autocomplete="nickname" required />
+        <button type="submit">Join</button>
+      </form>
+      <p id="status" role="status">Enter a display name to join.</p>
+      <section id="room" hidden>
+        <h2>In the room</h2>
+        <ul id="participants"></ul>
+      </section>
+    </main>
+    <script type="module" src="/client.js"></script>
+  </body>
+</html>
