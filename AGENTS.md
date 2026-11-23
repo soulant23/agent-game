@@ -44,7 +44,10 @@ Server: Node + TypeScript + `ws`. Client: plain HTML/JS + canvas in `public/`.
 - Audio signaling: see `docs/audio-signaling.md`.
 
 ## Testing rules
-- If a test fails, fix the code. Never weaken or delete a test without asking.
+- Keep tests isolated and organized by feature.
+- If a test fails, investigate the root cause and fix the implementation.
+- Never weaken, skip, or delete a failing test just to make the test suite pass.
+- If a test appears incorrect, explain why and ask for approval before changing it.
 
 ## Do not
 - Do not add new dependencies without asking.
