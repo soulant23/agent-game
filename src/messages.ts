@@ -11,10 +11,13 @@ export const TICK_RATE = 20;
 export const TICK_INTERVAL_MS = 1000 / TICK_RATE;
 export const MAX_MOVE_INTERVAL_MS = 100;
 export const MAX_MESSAGES_PER_SECOND = 60;
+export const MAX_CHAT_LENGTH = 200;
+export const CHAT_LIMIT = 5;
+export const CHAT_WINDOW_MS = 10_000;
 export const MOVE_MAGNITUDE_TOLERANCE = 1e-6;
 export const MAX_MOVE_MAGNITUDE = 1 + MOVE_MAGNITUDE_TOLERANCE;
 
-export type ClientMessage = JoinMessage | MoveMessage;
+export type ClientMessage = JoinMessage | MoveMessage | ChatMessage;
 
 export interface JoinMessage {
   type: 'join';
@@ -25,6 +28,11 @@ export interface MoveMessage {
   type: 'move';
   dx: number;
   dy: number;
+}
+
+export interface ChatMessage {
+  type: 'chat';
+  text: string;
 }
 
 export interface PlayerPosition {
@@ -38,6 +46,7 @@ export type ServerMessage =
   | PresenceMessage
   | SnapshotMessage
   | PositionsMessage
+  | ChatBroadcastMessage
   | ErrorMessage;
 
 export interface JoinedMessage {
@@ -62,6 +71,13 @@ export interface PositionsMessage {
   players: PlayerPosition[];
 }
 
+export interface ChatBroadcastMessage {
+  type: 'chat';
+  displayName: string;
+  text: string;
+  timestamp: number;
+}
+
 export type ErrorCode =
   | 'invalid_message'
   | 'message_too_large'
@@ -71,6 +87,7 @@ export type ErrorCode =
   | 'not_joined'
   | 'invalid_move'
   | 'invalid_move_magnitude'
+  | 'invalid_chat'
   | 'rate_limited';
 
 export interface ErrorMessage {

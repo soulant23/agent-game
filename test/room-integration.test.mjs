@@ -92,6 +92,22 @@ function waitForError(socket, code) {
   return waitForMessage(socket, (message) => message.type === 'error' && message.code === code);
 }
 
+function waitForChat(socket, text) {
+  return waitForMessage(
+    socket,
+    (message) => message.type === 'chat' && (text === undefined || message.text === text),
+  );
+}
+
+async function collectMessages(socket, durationMs = 400) {
+  const collected = [];
+  const onMessage = (data) => collected.push(JSON.parse(data.toString()));
+  socket.on('message', onMessage);
+  await delay(durationMs);
+  socket.off('message', onMessage);
+  return collected;
+}
+
 function player(message, name) {
   return message.players.find((entry) => entry.displayName === name);
 }
@@ -175,7 +191,7 @@ test('rejects empty and too-long display names', async () => {
 test('rejects messages that are not known message types', async () => {
   const socket = openSocket();
   await onceOpen(socket);
-  socket.send(JSON.stringify({ type: 'chat', text: 'hello' }));
+  socket.send(JSON.stringify({ type: 'dance', text: 'hello' }));
 
   const error = await waitForError(socket, 'invalid_message');
   assert.equal(error.type, 'error');
@@ -338,4 +354,150 @@ test('rate limits excessive messages and sends at most one error per second', as
 
   assert.equal(errors.length, 1);
   await closeSocket(socket);
+});
+
+test('broadcasts chat to everyone including the sender', async () => {
+  const { socket: alice } = await openAndJoin('ChatAlice');
+  const { socket: bob } = await openAndJoin('ChatBob');
+  try {
+    const toAlice = waitForChat(alice, 'hello room');
+    const toBob = waitForChat(bob, 'hello room');
+    alice.send(JSON.stringify({ type: 'chat', text: '  hello room  ' }));
+
+    const [fromAlice, fromBob] = await Promise.all([toAlice, toBob]);
+    assert.deepEqual(fromAlice, fromBob);
+    assert.equal(fromAlice.displayName, 'ChatAlice');
+    assert.equal(fromAlice.text, 'hello room');
+    assert.equal(typeof fromAlice.timestamp, 'number');
+    assert.ok(fromAlice.timestamp > 0);
+  } finally {
+    await closeSocket(alice);
+    await closeSocket(bob);
+  }
+});
+
+test('sets display name and timestamp on the server', async () => {
+  const { socket } = await openAndJoin('ChatSpoof');
+  try {
+    const sentAt = Date.now();
+    socket.send(JSON.stringify({
+      type: 'chat',
+      text: 'trusted',
+      displayName: 'Admin',
+      timestamp: 0,
+    }));
+
+    const message = await waitForChat(socket, 'trusted');
+    assert.equal(message.displayName, 'ChatSpoof');
+    assert.notEqual(message.displayName, 'Admin');
+    assert.ok(message.timestamp >= sentAt);
+    assert.ok(message.timestamp <= Date.now());
+  } finally {
+    await closeSocket(socket);
+  }
+});
+
+test('rejects invalid chat text', async () => {
+  const { socket } = await openAndJoin('ChatValidator');
+  try {
+    for (const text of ['', '   ', 'x'.repeat(201), 42, null]) {
+      socket.send(JSON.stringify({ type: 'chat', text }));
+      const error = await waitForError(socket, 'invalid_chat');
+      assert.equal(error.type, 'error');
+    }
+  } finally {
+    await closeSocket(socket);
+  }
+});
+
+test('rejects chat before join', async () => {
+  const socket = openSocket();
+  try {
+    await onceOpen(socket);
+    socket.send(JSON.stringify({ type: 'chat', text: 'early' }));
+    const error = await waitForError(socket, 'not_joined');
+    assert.equal(error.type, 'error');
+  } finally {
+    await closeSocket(socket);
+  }
+});
+
+test('rate limits chat to five messages per ten seconds', async () => {
+  const { socket } = await openAndJoin('ChatRate');
+  try {
+    const collected = collectMessages(socket);
+    for (let index = 0; index < 6; index += 1) {
+      socket.send(JSON.stringify({ type: 'chat', text: `chat-${index}` }));
+    }
+
+    const received = await collected;
+    const chats = received.filter((message) => message.type === 'chat');
+    const limited = received.filter(
+      (message) => message.type === 'error' && message.code === 'rate_limited',
+    );
+    assert.deepEqual(chats.map((message) => message.text), [
+      'chat-0', 'chat-1', 'chat-2', 'chat-3', 'chat-4',
+    ]);
+    assert.equal(limited.length, 1);
+    assert.ok(!chats.some((message) => message.text === 'chat-5'));
+  } finally {
+    await closeSocket(socket);
+  }
+});
+
+test('delivers long Vietnamese text within the byte limit', async () => {
+  const { socket } = await openAndJoin('ChatTiengViet');
+  try {
+    const text = 'Tiếng Việt '.repeat(18).trim();
+    assert.ok(text.length <= 200);
+    assert.ok(Buffer.byteLength(text, 'utf8') <= 1024);
+
+    socket.send(JSON.stringify({ type: 'chat', text }));
+    const message = await waitForChat(socket, text);
+    assert.equal(message.text, text);
+    assert.equal(message.displayName, 'ChatTiengViet');
+  } finally {
+    await closeSocket(socket);
+  }
+});
+
+test('does not send chat history to new joiners', async () => {
+  const { socket: alice } = await openAndJoin('HistoryAlice');
+  let bob;
+  try {
+    alice.send(JSON.stringify({ type: 'chat', text: 'before-join' }));
+    await waitForChat(alice, 'before-join');
+
+    bob = openSocket();
+    await onceOpen(bob);
+    bob.send(JSON.stringify({ type: 'join', displayName: 'HistoryBob' }));
+    await waitForMessage(bob, (message) => message.type === 'snapshot');
+    const received = await collectMessages(bob, 200);
+    assert.ok(!received.some((message) => message.type === 'chat'));
+  } finally {
+    if (bob !== undefined) await closeSocket(bob);
+    await closeSocket(alice);
+  }
+});
+
+test('keeps chat working after another player disconnects', async () => {
+  const { socket: alice } = await openAndJoin('ChatStay');
+  const { socket: bob } = await openAndJoin('ChatLeave');
+  try {
+    await closeSocket(bob);
+    await delay(80);
+
+    const collected = collectMessages(alice);
+    alice.send(JSON.stringify({ type: 'chat', text: 'still here' }));
+    const received = await collected;
+    const message = received.find(
+      (entry) => entry.type === 'chat' && entry.text === 'still here',
+    );
+    assert.ok(message, 'chat message missing after disconnect');
+    assert.equal(message.displayName, 'ChatStay');
+    assert.ok(!received.some((entry) => entry.type === 'error'));
+  } finally {
+    await closeSocket(alice);
+    await closeSocket(bob);
+  }
 });

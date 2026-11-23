@@ -1,8 +1,8 @@
 # Virtual Room WebSocket Protocol
 
-Phase 2a adds movement only; there is no chat protocol. Clients send movement
-intent, never absolute positions. The server owns authoritative positions,
-validates intents, and publishes state on a fixed tick.
+Clients send movement intent and chat text; the server owns authoritative
+positions and display names. It validates all input, publishes positions on a
+fixed tick, and broadcasts chat immediately. No chat history yet.
 
 ## Constants
 
@@ -15,6 +15,7 @@ validates intents, and publishes state on a fixed tick.
 | `TICK_RATE` | `20` | Position broadcasts per second (50 ms) |
 | `MAX_MOVE_INTERVAL_MS` | `100` | Max elapsed time used for one move |
 | `MAX_MESSAGES_PER_SECOND` | `60` | Per-socket message limit |
+| `MAX_CHAT_LENGTH` | `200` | Trimmed chars; chat limited to 5 per 10 s |
 | `MAX_MESSAGE_BYTES` | `1024` | Existing payload limit |
 
 Valid centers: `x` in `[12, 788]`, `y` in `[12, 588]`; spawn `(400, 300)`; outbound coordinates rounded to 2 decimals.
@@ -38,6 +39,18 @@ Valid centers: `x` in `[12, 788]`, `y` in `[12, 588]`; spawn `(400, 300)`; outbo
 e.g. `(Math.SQRT1_2, Math.SQRT1_2)`; the tolerance accepts floating-point drift.
 `lastMoveAt` starts at join time. Stopping means sending no moves or `(0, 0)`.
 Extra fields are ignored; invalid fields produce an `error`.
+
+### `chat`
+
+```json
+{ "type": "chat", "text": "Hello" }
+```
+
+`text` must be a string. The server trims it and rejects empty or over-length
+text with `invalid_chat`; only joined sockets may chat.
+
+Valid chat is limited to 5 messages per 10 seconds per connection. Excess
+messages are dropped, not queued, and return `rate_limited`.
 
 ## Server behavior
 
@@ -100,6 +113,21 @@ Broadcast to all joined clients every 50 ms, even when nothing moved.
 
 Unchanged: `{ "type": "presence", "participants": ["Alice", "Bob"] }`.
 
+### `chat` (new)
+
+Broadcast to all joined clients, including the sender; no history is stored.
+
+```json
+{
+  "type": "chat",
+  "displayName": "Alice",
+  "text": "Hello",
+  "timestamp": 1730000000000
+}
+```
+
+`displayName` and `timestamp` are set by the server, never the client.
+
 ### `error` (extended)
 
 ```json
@@ -116,7 +144,8 @@ Unchanged: `{ "type": "presence", "participants": ["Alice", "Bob"] }`.
 | `not_joined` | `move` received before `join` |
 | `invalid_move` | Missing or non-finite `dx` or `dy` |
 | `invalid_move_magnitude` | Magnitude greater than `1 + 1e-6` |
-| `rate_limited` | More than 60 messages in one second |
+| `invalid_chat` | Trimmed chat text empty or longer than 200 chars |
+| `rate_limited` | Over 60 messages/sec or 5 chats/10s |
 
 An error changes no authoritative state.
 
@@ -125,5 +154,6 @@ An error changes no authoritative state.
 - Join: `joined` → `snapshot` → `presence` (broadcast to everyone).
 - Movement: `move` may produce an `error`; state changes appear in the next
   `positions` broadcast.
+- Chat: `chat` → `error` or immediate `chat` broadcast to all joined clients.
 - Disconnect: the player is removed immediately; the next `presence` and
   `positions` broadcasts exclude them.
