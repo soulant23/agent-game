@@ -15,6 +15,7 @@
       #messages { list-style: none; max-height: 12rem; overflow-y: auto; padding: 0; }
       #messages li { padding: 0.15rem 0; }
       #chat-form { margin-top: 0.5rem; }
+      #audio-controls { margin-top: 0.5rem; }
     </style>
   </head>
   <body>
@@ -36,6 +37,11 @@
           <button type="submit">Send</button>
         </form>
       </section>
+      <section id="audio-controls" hidden>
+        <button id="mic-toggle" type="button" aria-pressed="false">Mic on</button>
+        <button id="mic-retry" type="button" hidden>Retry mic</button>
+      </section>
+      <div id="audio-host" hidden></div>
     </main>
     <script type="module" src="/client.js"></script>
   </body>

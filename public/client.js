@@ -1,3 +1,12 @@
+import {
+  configureAudio,
+  onJoinedAudio,
+  onPresenceAudio,
+  onSignalAudio,
+  primeAudioAutoplay,
+  stopAudio,
+} from './audio.js';
+
 const WORLD_WIDTH = 800;
 const WORLD_HEIGHT = 600;
 const PLAYER_RADIUS = 12;
@@ -35,6 +44,7 @@ form.addEventListener('submit', (event) => {
     setStatus('Display name must be at most 20 characters.');
     return;
   }
+  primeAudioAutoplay();
   connect(displayName);
 });
 
@@ -94,12 +104,17 @@ function connect(displayName) {
       hint.hidden = false;
       canvas.hidden = false;
       chat.hidden = false;
+      onJoinedAudio(message.displayName, message.participants);
       moveTimer = setInterval(sendMovementIntent, MOVE_INTERVAL_MS);
     } else if (message.type === 'snapshot' || message.type === 'positions') {
       players = message.players;
       render();
     } else if (message.type === 'chat') {
       appendChat(message);
+    } else if (message.type === 'presence') {
+      onPresenceAudio(message.participants);
+    } else if (message.type === 'signal') {
+      onSignalAudio(message);
     } else if (message.type === 'error') {
       setStatus(message.message);
       if (message.code === 'duplicate_display_name' || message.code === 'already_joined') {
@@ -167,6 +182,7 @@ function appendChat(message) {
 }
 
 function stopPlaying() {
+  stopAudio();
   joined = false;
   keys.clear();
   players = [];
@@ -181,3 +197,10 @@ function stopPlaying() {
 function setStatus(text) {
   status.textContent = text;
 }
+
+function sendAudio(message) {
+  if (!joined || !socket || socket.readyState !== WebSocket.OPEN) return;
+  socket.send(JSON.stringify(message));
+}
+
+configureAudio(sendAudio, setStatus);
