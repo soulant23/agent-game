@@ -66,7 +66,7 @@ async function listPublicFiles(dir = publicDir) {
   for (const entry of entries) {
     const url = new URL(entry.name, dir);
     if (entry.isDirectory()) {
-      files.push(...await listPublicFiles(url));
+      files.push(...await listPublicFiles(new URL(`${entry.name}/`, dir)));
     } else {
       files.push(url);
     }
