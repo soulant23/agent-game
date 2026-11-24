@@ -10,11 +10,12 @@ import {
 const WORLD_WIDTH = 800;
 const WORLD_HEIGHT = 600;
 const PLAYER_RADIUS = 12;
-const MOVE_INTERVAL_MS = 50;
-const MOVE_KEYS = new Set([
-  'w', 'a', 's', 'd',
-  'arrowup', 'arrowdown', 'arrowleft', 'arrowright',
-]);
+const TICK_RATE = 20;
+const MAX_SPEED = 200;
+const MOVE_STEP = MAX_SPEED / TICK_RATE;
+const MOVE_INTERVAL_MS = 1000 / TICK_RATE;
+const ARRIVAL_DISTANCE = 2;
+const HOLD_THRESHOLD_MS = 200;
 
 const form = document.querySelector('#join-form');
 const input = document.querySelector('#display-name');
@@ -32,7 +33,12 @@ let joined = false;
 let moveTimer = null;
 let players = [];
 let selfDisplayName = '';
-const keys = new Set();
+let target = null;
+let pointerHeld = false;
+let activePointerId = null;
+let pointerStartX = 0;
+let pointerStartY = 0;
+let pointerDownAt = 0;
 
 const rootStyles = getComputedStyle(document.documentElement);
 const canvasTokens = {
@@ -74,21 +80,35 @@ chatForm.addEventListener('submit', (event) => {
   chatInput.focus();
 });
 
-window.addEventListener('keydown', (event) => {
-  if (document.activeElement === chatInput) return;
-  const key = event.key.toLowerCase();
-  if (!MOVE_KEYS.has(key)) return;
+canvas.addEventListener('pointerdown', (event) => {
+  if (!joined || pointerHeld) return;
   event.preventDefault();
-  keys.add(key);
+  pointerHeld = true;
+  activePointerId = event.pointerId;
+  pointerDownAt = Date.now();
+  pointerStartX = event.clientX;
+  pointerStartY = event.clientY;
+  target = toWorld(event);
+  canvas.setPointerCapture?.(event.pointerId);
 });
 
-window.addEventListener('keyup', (event) => {
-  if (document.activeElement === chatInput) return;
-  keys.delete(event.key.toLowerCase());
+canvas.addEventListener('pointermove', (event) => {
+  if (!pointerHeld || event.pointerId !== activePointerId) return;
+  target = toWorld(event);
 });
 
-chatInput.addEventListener('focus', () => {
-  keys.clear();
+canvas.addEventListener('pointerup', (event) => {
+  if (!pointerHeld || event.pointerId !== activePointerId) return;
+  const moved = Math.hypot(event.clientX - pointerStartX, event.clientY - pointerStartY) > 4;
+  const held = Date.now() - pointerDownAt >= HOLD_THRESHOLD_MS;
+  if (moved || held) target = null;
+  endPointer(event);
+});
+
+canvas.addEventListener('pointercancel', (event) => {
+  if (!pointerHeld || event.pointerId !== activePointerId) return;
+  target = null;
+  endPointer(event);
 });
 
 chatInput.addEventListener('keydown', (event) => {
@@ -152,20 +172,42 @@ function connect(displayName) {
 
 function sendMovementIntent() {
   if (!joined || !socket || socket.readyState !== WebSocket.OPEN) return;
+  if (target === null) return;
 
-  let dx = 0;
-  let dy = 0;
-  if (keys.has('w') || keys.has('arrowup')) dy -= 1;
-  if (keys.has('s') || keys.has('arrowdown')) dy += 1;
-  if (keys.has('a') || keys.has('arrowleft')) dx -= 1;
-  if (keys.has('d') || keys.has('arrowright')) dx += 1;
+  const me = players.find((player) => player.displayName === selfDisplayName);
+  if (me === undefined) return;
 
-  const magnitude = Math.hypot(dx, dy);
-  if (magnitude > 0) {
-    dx /= magnitude;
-    dy /= magnitude;
+  const vx = target.x - me.x;
+  const vy = target.y - me.y;
+  const dist = Math.hypot(vx, vy);
+  if (dist < ARRIVAL_DISTANCE) {
+    socket.send(JSON.stringify({ type: 'move', dx: 0, dy: 0 }));
+    target = null;
+    return;
   }
-  socket.send(JSON.stringify({ type: 'move', dx, dy }));
+
+  const scale = Math.min(1, dist / MOVE_STEP) / dist;
+  socket.send(JSON.stringify({ type: 'move', dx: vx * scale, dy: vy * scale }));
+}
+
+function toWorld(event) {
+  const rect = canvas.getBoundingClientRect();
+  const x = (event.clientX - rect.left) * (WORLD_WIDTH / rect.width);
+  const y = (event.clientY - rect.top) * (WORLD_HEIGHT / rect.height);
+  return {
+    x: clamp(x, PLAYER_RADIUS, WORLD_WIDTH - PLAYER_RADIUS),
+    y: clamp(y, PLAYER_RADIUS, WORLD_HEIGHT - PLAYER_RADIUS),
+  };
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function endPointer(event) {
+  pointerHeld = false;
+  activePointerId = null;
+  if (canvas.hasPointerCapture?.(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
 }
 
 function render() {
@@ -214,7 +256,9 @@ function stopPlaying() {
   stopAudio();
   joined = false;
   selfDisplayName = '';
-  keys.clear();
+  target = null;
+  pointerHeld = false;
+  activePointerId = null;
   players = [];
   if (moveTimer !== null) clearInterval(moveTimer);
   moveTimer = null;
