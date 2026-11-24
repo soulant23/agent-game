@@ -1,0 +1,83 @@
+/* Material 3 light scheme, seed #1A73E8 */
+:root {
+  --md-sys-color-primary: #005bc0;
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: #d8e2ff;
+  --md-sys-color-on-primary-container: #001a41;
+  --md-sys-color-secondary: #565e71;
+  --md-sys-color-on-secondary: #ffffff;
+  --md-sys-color-secondary-container: #dbe2f9;
+  --md-sys-color-on-secondary-container: #131b2c;
+  --md-sys-color-tertiary: #715574;
+  --md-sys-color-on-tertiary: #ffffff;
+  --md-sys-color-tertiary-container: #fbd7fc;
+  --md-sys-color-on-tertiary-container: #29132d;
+  --md-sys-color-error: #ba1a1a;
+  --md-sys-color-on-error: #ffffff;
+  --md-sys-color-error-container: #ffdad6;
+  --md-sys-color-on-error-container: #410002;
+  --md-sys-color-background: #fefbff;
+  --md-sys-color-on-background: #1b1b1f;
+  --md-sys-color-surface: #fefbff;
+  --md-sys-color-on-surface: #1b1b1f;
+  --md-sys-color-surface-variant: #e1e2ec;
+  --md-sys-color-on-surface-variant: #44474f;
+  --md-sys-color-outline: #74777f;
+  --md-sys-color-outline-variant: #c4c6d0;
+  --md-sys-color-shadow: #000000;
+  --md-sys-color-scrim: #000000;
+  --md-sys-color-inverse-surface: #303033;
+  --md-sys-color-inverse-on-surface: #f2f0f4;
+  --md-sys-color-inverse-primary: #adc7ff;
+
+  /* Surface tones (derived from the neutral palette: tones 100/96/94/92/90/87/98) */
+  --md-sys-color-surface-container-lowest: #ffffff;
+  --md-sys-color-surface-container-low: #f5f3f7;
+  --md-sys-color-surface-container: #efedf1;
+  --md-sys-color-surface-container-high: #e9e7ec;
+  --md-sys-color-surface-container-highest: #e3e2e6;
+  --md-sys-color-surface-dim: #dbd9dd;
+  --md-sys-color-surface-bright: #faf9fd;
+
+  /* App status colors (ratios measured against surface #fefbff). */
+  --app-color-connecting: #7a4e00; /* 7.01:1 */
+  --app-color-connected: #1b7f3a;  /* 4.94:1 */
+  --app-color-disconnected: #ba1a1a; /* 6.29:1 */
+
+  /* App player fills (ratios measured against canvas surface-container-low). */
+  --app-player-1: #005bc0;
+  --app-player-2: #b3261e;
+  --app-player-3: #1b7f3a;
+  --app-player-4: #7a4e00;
+  --app-player-5: #715574;
+  --app-player-6: #006b6b;
+  --app-player-7: #8e457a;
+  --app-player-8: #3f5e00;
+  --app-player-outline: var(--md-sys-color-surface);
+
+  /* Spacing, radius, motion, elevation. */
+  --app-space-1: 4px;
+  --app-space-2: 8px;
+  --app-space-3: 16px;
+  --app-space-4: 24px;
+  --app-space-5: 32px;
+  --app-radius-sm: 4px;
+  --app-radius-md: 8px;
+  --app-radius-lg: 16px;
+  --app-duration-fast: 120ms;
+  --app-duration-medium: 200ms;
+  --app-duration-slow: 320ms;
+  --app-shadow-soft: 0 2px 8px rgba(27, 27, 31, 0.12);
+
+  /* Typography roles. */
+  --app-font-stack: Roboto, system-ui, sans-serif;
+  --app-type-title: 700 22px/28px var(--app-font-stack);
+  --app-type-body: 400 14px/20px var(--app-font-stack);
+  --app-type-label: 500 12px/16px var(--app-font-stack);
+
+  /* State layers derived from on-surface (#1b1b1f). */
+  --app-state-hover: rgba(27, 27, 31, 0.08);
+  --app-state-focus: rgba(27, 27, 31, 0.12);
+  --app-state-pressed: rgba(27, 27, 31, 0.18);
+  --app-state-disabled: rgba(27, 27, 31, 0.38);
+}
