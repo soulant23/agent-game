@@ -27,7 +27,7 @@ Mesh topology; design target up to 8 players.
 ```
 - Relayed only to `target`'s joined socket in this room; sender is never echoed.
 - `from` is always the server's registered display name for that socket.
-- Offer creates a peer only if the sender is in the current `participants`; answer/ice from an unknown peer is ignored.
+- The server validates that the sender is joined before relaying, so offers create a peer on receipt; answer/ice from an unknown peer is ignored.
 
 ## Offer ownership
 - Join order comes from `joined.participants` / `snapshot.players`.
@@ -38,6 +38,8 @@ Mesh topology; design target up to 8 players.
 - Offer side: create peer with an audio `sendrecv` transceiver up front; attach mic via `replaceTrack` on grant/retry.
 - Answer side: reuse the remote offer's transceiver; no second `addTransceiver`; attach mic via `replaceTrack`.
 - `offer`/`answer` creates or updates that peer; `ice` adds a candidate.
+- A late joiner requests the mic before sending offers, so its outbound audio is in the initial offer.
+- The answerer sets its transceiver to `sendrecv` before answering so its mic reaches the joiner.
 - ICE arriving before `setRemoteDescription` is queued and flushed afterwards.
 - On `presence` removal or `connectionState === 'failed'`, close/delete the peer and its hidden `<audio>`.
 
