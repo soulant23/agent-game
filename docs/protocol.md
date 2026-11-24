@@ -39,6 +39,7 @@ Valid centers: `x` in `[12, 788]`, `y` in `[12, 588]`; spawn `(400, 300)`; outbo
 e.g. `(Math.SQRT1_2, Math.SQRT1_2)`; the tolerance accepts floating-point drift.
 `lastMoveAt` starts at join time. Stopping means sending no moves or `(0, 0)`.
 Extra fields are ignored; invalid fields produce an `error`.
+Magnitude may be below 1; the server scales movement linearly (partial speed).
 
 ### `chat`
 
@@ -51,6 +52,28 @@ text with `invalid_chat`; only joined sockets may chat.
 
 Valid chat is limited to 5 messages per 10 seconds per connection. Excess
 messages are dropped, not queued, and return `rate_limited`.
+
+## Mouse-driven movement (client behavior)
+
+The protocol is unchanged: the mouse is converted to a `move` direction on the
+client. The server never receives a target position.
+
+- Input: `pointerdown` sets `target`; while the pointer is held, `pointermove`
+  updates `target`. Pointer events never send messages directly.
+- Target conversion: client coordinates are mapped to world coordinates using
+  `canvas.getBoundingClientRect()` and the `WORLD_WIDTH`/`WORLD_HEIGHT` scale,
+  then clamped to the valid center range (`x` in `[12, 788]`, `y` in `[12, 588]`).
+- Send loop: every 50 ms (`TICK_RATE`), while `target` is set, compute
+  `v = target - myPosition` using the latest position from `snapshot`/`positions`.
+  - `dist = |v|`, `step = MAX_SPEED / TICK_RATE` = 10 px.
+  - Send `dx, dy = (v / dist) * min(1, dist / step)`.
+    The magnitude is always <= 1, so it never triggers `invalid_move_magnitude`,
+    and the player decelerates into the target instead of overshooting.
+  - If `dist < 1`, send `(0, 0)` once and clear `target`.
+- Stop: with no `target`, the client sends nothing (or one `(0, 0)`). Pressing
+  Esc, or releasing a hold-to-move pointer, clears `target`.
+- If keyboard movement is also supported, both inputs share the same send loop
+  and the most recent input source wins.
 
 ## Server behavior
 
@@ -71,7 +94,8 @@ server never trusts client timestamps or positions.
 
 Each socket may send at most 60 messages per second. Extra messages are ignored.
 A `rate_limited` error is sent at most once per second while the limit is
-exceeded.
+exceeded. Clients must send moves on a timer (about 20/s), never once per
+`pointermove` event, which can exceed 60/s.
 
 ## Server to client
 
@@ -161,7 +185,16 @@ Chat/move stay capped at 1024 bytes; signaling uses an 8192-byte cap.
 
 - Join: `joined` → `snapshot` → `presence` (broadcast to everyone).
 - Movement: `move` may produce an `error`; state changes appear in the next
-  `positions` broadcast.
+  `positions` broadcast. Clients should send moves continuously while a target
+  is active; the server caps `elapsedMs` at `MAX_MOVE_INTERVAL_MS` (100 ms), so
+  gaps longer than that lose movement.
 - Chat: `chat` → `error` or immediate `chat` broadcast to all joined clients.
 - Disconnect: the player is removed immediately; the next `presence` and
   `positions` broadcasts exclude them.
+
+## Decisions
+
+- No `moveTo` message: keeping direction intent preserves server authority,
+  the speed cap, and the existing validation.
+- Pathfinding and obstacles are out of scope (the room is an open rectangle).
+- Client-side prediction is optional; the server position is the truth.
