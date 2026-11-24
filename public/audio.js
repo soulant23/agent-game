@@ -37,19 +37,20 @@ export function primeAudioAutoplay() {
   }
 }
 
-export function onJoinedAudio(displayName, names) {
+export async function onJoinedAudio(displayName, names) {
   selfName = displayName;
   participants = [...names];
   if (controls) controls.hidden = false;
 
+  await requestMic();
+
   const selfIndex = participants.findIndex((name) => normalize(name) === normalize(selfName));
-  for (let index = 0; index < selfIndex; index += 1) {
-    const name = participants[index];
-    if (normalize(name) === normalize(selfName)) continue;
-    const peer = getOrCreatePeer(name, true);
-    void startOffer(peer);
-  }
-  void requestMic();
+  const earlierNames = participants
+    .slice(0, selfIndex)
+    .filter((name) => normalize(name) !== normalize(selfName));
+  const offerPeers = earlierNames.map((name) => getOrCreatePeer(name, true));
+  await Promise.all(offerPeers.map((peer) => attachLocalTrack(peer)));
+  await Promise.all(offerPeers.map((peer) => startOffer(peer)));
 }
 
 export function onPresenceAudio(names) {
@@ -59,22 +60,20 @@ export function onPresenceAudio(names) {
   }
 }
 
-export function onSignalAudio(message) {
+export async function onSignalAudio(message) {
   const key = normalize(message.from);
-  const inRoom = participants.some((name) => normalize(name) === key);
   if (key === normalize(selfName)) return;
 
   if (message.kind === 'offer') {
-    if (!inRoom) return;
     const peer = getOrCreatePeer(message.from, false);
-    void handleOffer(peer, message.data);
+    await handleOffer(peer, message.data);
     return;
   }
 
   const peer = peers.get(key);
   if (peer === undefined) return;
-  if (message.kind === 'answer') void handleAnswer(peer, message.data);
-  if (message.kind === 'ice') void handleIce(peer, message.data);
+  if (message.kind === 'answer') await handleAnswer(peer, message.data);
+  if (message.kind === 'ice') await handleIce(peer, message.data);
 }
 
 export function stopAudio() {
@@ -121,7 +120,6 @@ function getOrCreatePeer(name, isOfferer) {
   if (isOfferer) {
     const transceiver = pc.addTransceiver('audio', { direction: 'sendrecv' });
     peer.audioSender = transceiver.sender;
-    attachLocalTrack(peer);
   }
   return peer;
 }
@@ -139,7 +137,7 @@ async function startOffer(peer) {
 async function handleOffer(peer, data) {
   try {
     await peer.pc.setRemoteDescription(data);
-    rememberAnswerSender(peer);
+    await rememberAnswerSender(peer);
     await flushIce(peer);
     const answer = await peer.pc.createAnswer();
     await peer.pc.setLocalDescription(answer);
@@ -182,21 +180,21 @@ async function flushIce(peer) {
   }
 }
 
-function rememberAnswerSender(peer) {
+async function rememberAnswerSender(peer) {
   if (peer.audioSender !== null) return;
   const transceiver = peer.pc
     .getTransceivers()
     .find((entry) => entry.receiver.track.kind === 'audio');
-  if (transceiver) {
-    peer.audioSender = transceiver.sender;
-    attachLocalTrack(peer);
-  }
+  if (!transceiver) return;
+  transceiver.direction = 'sendrecv';
+  peer.audioSender = transceiver.sender;
+  await attachLocalTrack(peer);
 }
 
 function attachLocalTrack(peer) {
   const track = localStream?.getAudioTracks()[0];
-  if (track === undefined || peer.audioSender === null) return;
-  void peer.audioSender.replaceTrack(track).catch(() => {});
+  if (track === undefined || peer.audioSender === null) return Promise.resolve();
+  return peer.audioSender.replaceTrack(track).catch(() => {});
 }
 
 async function requestMic() {
@@ -208,7 +206,7 @@ async function requestMic() {
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     micEnabled = true;
     if (micRetry) micRetry.hidden = true;
-    for (const peer of peers.values()) attachLocalTrack(peer);
+    await Promise.all([...peers.values()].map((peer) => attachLocalTrack(peer)));
     reportStatus('Microphone on.');
   } catch (error) {
     micEnabled = false;

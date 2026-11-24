@@ -121,7 +121,7 @@ function connect(displayName) {
       hint.hidden = false;
       canvas.hidden = false;
       chat.hidden = false;
-      onJoinedAudio(message.displayName, message.participants);
+      void onJoinedAudio(message.displayName, message.participants);
       moveTimer = setInterval(sendMovementIntent, MOVE_INTERVAL_MS);
     } else if (message.type === 'snapshot' || message.type === 'positions') {
       players = message.players;
@@ -131,7 +131,7 @@ function connect(displayName) {
     } else if (message.type === 'presence') {
       onPresenceAudio(message.participants);
     } else if (message.type === 'signal') {
-      onSignalAudio(message);
+      void onSignalAudio(message);
     } else if (message.type === 'error') {
       setStatus(message.message, 'disconnected');
       if (message.code === 'duplicate_display_name' || message.code === 'already_joined') {
