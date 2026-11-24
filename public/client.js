@@ -54,8 +54,8 @@ const sprites = { idle: null, run: null };
 let spritesLoaded = false;
 
 const spritesReady = Promise.all([
-  loadSprite('/Tuxedo-Idle.png', IDLE_FRAMES, 'Tuxedo-Idle.png'),
-  loadSprite('/Tuxedo-Run.png', RUN_FRAMES, 'Tuxedo-Run.png'),
+  loadSprite('/assets/Tuxedo-Idle.png', IDLE_FRAMES, 'Tuxedo-Idle.png'),
+  loadSprite('/assets/Tuxedo-Run.png', RUN_FRAMES, 'Tuxedo-Run.png'),
 ]).then(([idle, run]) => {
   sprites.idle = idle;
   sprites.run = run;
