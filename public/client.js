@@ -17,12 +17,19 @@ const MOVE_INTERVAL_MS = 1000 / TICK_RATE;
 const ARRIVAL_DISTANCE = 2;
 const HOLD_THRESHOLD_MS = 200;
 
+const IDLE_FRAMES = 12;
+const RUN_FRAMES = 6;
+const IDLE_FRAME_MS = 150;
+const RUN_FRAME_MS = 80;
+const SPRITE_DRAW_WIDTH = 48;
+
 const form = document.querySelector('#join-form');
 const input = document.querySelector('#display-name');
 const status = document.querySelector('#status');
 const hint = document.querySelector('#hint');
 const canvas = document.querySelector('#room-canvas');
 const context = canvas.getContext('2d');
+context.imageSmoothingEnabled = false;
 const chat = document.querySelector('#chat');
 const messages = document.querySelector('#messages');
 const chatForm = document.querySelector('#chat-form');
@@ -39,6 +46,21 @@ let activePointerId = null;
 let pointerStartX = 0;
 let pointerStartY = 0;
 let pointerDownAt = 0;
+let previousSnapshot = null;
+let currentSnapshot = null;
+let renderFrame = null;
+const avatarStates = new Map();
+const sprites = { idle: null, run: null };
+let spritesLoaded = false;
+
+const spritesReady = Promise.all([
+  loadSprite('/Tuxedo-Idle.png', IDLE_FRAMES, 'Tuxedo-Idle.png'),
+  loadSprite('/Tuxedo-Run.png', RUN_FRAMES, 'Tuxedo-Run.png'),
+]).then(([idle, run]) => {
+  sprites.idle = idle;
+  sprites.run = run;
+  spritesLoaded = true;
+});
 
 const rootStyles = getComputedStyle(document.documentElement);
 const canvasTokens = {
@@ -53,6 +75,29 @@ const canvasTokens = {
 
 function readToken(name) {
   return rootStyles.getPropertyValue(name).trim();
+}
+
+function loadSprite(url, expectedFrameCount, name) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      const frameW = image.naturalWidth / expectedFrameCount;
+      if (!Number.isInteger(frameW) || image.naturalHeight <= 0) {
+        console.warn(
+          `${name}: width ${image.naturalWidth} is not evenly divisible by ` +
+            `${expectedFrameCount} frames; frame count is probably wrong.`,
+        );
+      }
+      resolve({
+        image,
+        frameW,
+        frameH: image.naturalHeight,
+        frameCount: expectedFrameCount,
+      });
+    };
+    image.onerror = () => resolve(null);
+    image.src = url;
+  });
 }
 
 form.addEventListener('submit', (event) => {
@@ -143,7 +188,14 @@ function connect(displayName) {
       chat.hidden = false;
       onJoinedAudio(message.displayName, message.participants);
       moveTimer = setInterval(sendMovementIntent, MOVE_INTERVAL_MS);
+      void spritesReady.then(() => {
+        if (joined) startRenderLoop();
+      });
     } else if (message.type === 'snapshot' || message.type === 'positions') {
+      const now = performance.now();
+      updateAvatarStates(players, message.players, now);
+      previousSnapshot = currentSnapshot;
+      currentSnapshot = { players: message.players.map((player) => ({ ...player })), time: now };
       players = message.players;
       render();
     } else if (message.type === 'chat') {
@@ -211,26 +263,146 @@ function endPointer(event) {
 }
 
 function render() {
+  if (!spritesLoaded) return;
   context.fillStyle = canvasTokens.background;
   context.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
   context.strokeStyle = canvasTokens.boundary;
   context.lineWidth = 1;
   context.strokeRect(0.5, 0.5, WORLD_WIDTH - 1, WORLD_HEIGHT - 1);
 
-  for (const player of players) {
-    context.beginPath();
-    context.arc(player.x, player.y, PLAYER_RADIUS, 0, Math.PI * 2);
-    context.fillStyle = canvasTokens.players[playerColorIndex(player.displayName)];
-    context.fill();
-    context.strokeStyle =
-      player.displayName === selfDisplayName ? canvasTokens.self : canvasTokens.playerOutline;
-    context.stroke();
-
-    context.fillStyle = canvasTokens.label;
-    context.font = canvasTokens.labelFont;
-    context.textAlign = 'center';
-    context.fillText(player.displayName, player.x, player.y - PLAYER_RADIUS - 6);
+  const now = performance.now();
+  for (const player of interpolatedPlayers(now)) {
+    const drawnHeight = drawCat(player, now);
+    if (drawnHeight === null) {
+      drawCircle(player);
+      drawLabel(player, null);
+    } else {
+      drawLabel(player, drawnHeight);
+    }
   }
+}
+
+function drawCat(player, now) {
+  const avatar = avatarStates.get(player.displayName);
+  if (avatar === undefined) return null;
+  const sprite = avatar.state === 'run' ? sprites.run : sprites.idle;
+  if (sprite === null) return null;
+
+  const frame = advanceAvatar(avatar, sprite, now);
+  const drawH = SPRITE_DRAW_WIDTH * (sprite.frameH / sprite.frameW);
+  const drawX = player.x - SPRITE_DRAW_WIDTH / 2;
+  const drawY = player.y + PLAYER_RADIUS - drawH;
+  const sourceX = frame * sprite.frameW;
+
+  if (avatar.facing < 0) {
+    context.save();
+    context.translate(drawX + SPRITE_DRAW_WIDTH / 2, drawY + drawH / 2);
+    context.scale(-1, 1);
+    context.drawImage(
+      sprite.image,
+      sourceX, 0, sprite.frameW, sprite.frameH,
+      -SPRITE_DRAW_WIDTH / 2, -drawH / 2, SPRITE_DRAW_WIDTH, drawH,
+    );
+    context.restore();
+  } else {
+    context.drawImage(
+      sprite.image,
+      sourceX, 0, sprite.frameW, sprite.frameH,
+      drawX, drawY, SPRITE_DRAW_WIDTH, drawH,
+    );
+  }
+  return drawH;
+}
+
+function drawCircle(player) {
+  context.beginPath();
+  context.arc(player.x, player.y, PLAYER_RADIUS, 0, Math.PI * 2);
+  context.fillStyle = canvasTokens.players[playerColorIndex(player.displayName)];
+  context.fill();
+  context.strokeStyle =
+    player.displayName === selfDisplayName ? canvasTokens.self : canvasTokens.playerOutline;
+  context.stroke();
+}
+
+function drawLabel(player, drawnHeight) {
+  const top = drawnHeight === null
+    ? player.y - PLAYER_RADIUS
+    : player.y + PLAYER_RADIUS - drawnHeight;
+  context.fillStyle = canvasTokens.label;
+  context.font = canvasTokens.labelFont;
+  context.textAlign = 'center';
+  context.fillText(player.displayName, player.x, top - 6);
+}
+
+function interpolatedPlayers(now) {
+  if (currentSnapshot === null) return players;
+  if (previousSnapshot === null) return currentSnapshot.players;
+
+  const interval = currentSnapshot.time - previousSnapshot.time;
+  const elapsed = now - previousSnapshot.time;
+  const alpha = interval > 0 ? Math.max(0, Math.min(1, elapsed / interval)) : 1;
+
+  return currentSnapshot.players.map((player) => {
+    const before = previousSnapshot.players.find((entry) => entry.displayName === player.displayName);
+    if (before === undefined) return player;
+    return {
+      ...player,
+      x: before.x + (player.x - before.x) * alpha,
+      y: before.y + (player.y - before.y) * alpha,
+    };
+  });
+}
+
+function updateAvatarStates(previousPlayers, nextPlayers, now) {
+  const names = new Set(nextPlayers.map((player) => player.displayName));
+  for (const name of [...avatarStates.keys()]) {
+    if (!names.has(name)) avatarStates.delete(name);
+  }
+
+  for (const player of nextPlayers) {
+    const before = previousPlayers.find((entry) => entry.displayName === player.displayName);
+    let avatar = avatarStates.get(player.displayName);
+    if (avatar === undefined) {
+      avatar = { state: 'idle', facing: 1, frameIndex: 0, lastFrameAt: now };
+      avatarStates.set(player.displayName, avatar);
+    }
+    if (before === undefined) continue;
+
+    const dx = player.x - before.x;
+    const dy = player.y - before.y;
+    const state = Math.hypot(dx, dy) > 0.5 ? 'run' : 'idle';
+    if (state !== avatar.state) {
+      avatar.state = state;
+      avatar.frameIndex = 0;
+      avatar.lastFrameAt = now;
+    }
+    if (Math.abs(dx) > 0.5) avatar.facing = dx < 0 ? -1 : 1;
+  }
+}
+
+function advanceAvatar(avatar, sprite, now) {
+  const duration = avatar.state === 'run' ? RUN_FRAME_MS : IDLE_FRAME_MS;
+  const elapsed = Math.max(0, now - avatar.lastFrameAt);
+  if (elapsed >= duration) {
+    const steps = Math.floor(elapsed / duration);
+    avatar.frameIndex = (avatar.frameIndex + steps) % sprite.frameCount;
+    avatar.lastFrameAt += steps * duration;
+  }
+  return avatar.frameIndex;
+}
+
+function startRenderLoop() {
+  if (renderFrame !== null) return;
+  const draw = () => {
+    render();
+    renderFrame = requestAnimationFrame(draw);
+  };
+  renderFrame = requestAnimationFrame(draw);
+}
+
+function stopRenderLoop() {
+  if (renderFrame !== null) cancelAnimationFrame(renderFrame);
+  renderFrame = null;
 }
 
 function playerColorIndex(displayName) {
@@ -259,6 +431,10 @@ function stopPlaying() {
   target = null;
   pointerHeld = false;
   activePointerId = null;
+  stopRenderLoop();
+  previousSnapshot = null;
+  currentSnapshot = null;
+  avatarStates.clear();
   players = [];
   if (moveTimer !== null) clearInterval(moveTimer);
   moveTimer = null;
